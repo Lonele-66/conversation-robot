@@ -1,0 +1,11 @@
+.venv/
+.idea/
+*.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+vector_db/
+documents/
+conversation_memory.json
+pet_diary.txt
