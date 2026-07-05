@@ -43,7 +43,7 @@ class DocumentLoader:
     
     def _load_pdf(self, file_path: str) -> List[Dict]:
         try:
-            from PyPDF2 import PdfReader
+            from pypdf import PdfReader
         except ImportError:
             raise ImportError("Please install pypdf: pip install pypdf")
         
