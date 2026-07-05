@@ -49,6 +49,11 @@
             font-weight: 600;
         }
         
+        .header .actions {
+            display: flex;
+            gap: 10px;
+        }
+        
         .header button {
             background: rgba(255, 255, 255, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.3);
@@ -110,11 +115,32 @@
             border-bottom-left-radius: 5px;
         }
         
-        .message.assistant .sources {
+        .message.assistant .meta {
             font-size: 12px;
             color: #888;
             margin-top: 8px;
             padding-left: 4px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .message.assistant .sources {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        
+        .message.assistant .sources span:first-child {
+            font-weight: 500;
+        }
+        
+        .message.assistant .intent {
+            background: #e8f4fd;
+            color: #3b82f6;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
         }
         
         .input-area {
@@ -179,6 +205,9 @@
             cursor: pointer;
             font-size: 14px;
             transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
         
         .upload-area label:hover {
@@ -189,9 +218,17 @@
             display: none;
         }
         
-        .upload-area span {
+        .upload-area .upload-info {
             font-size: 13px;
             color: #666;
+        }
+        
+        .upload-area .upload-info.success {
+            color: #10b981;
+        }
+        
+        .upload-area .upload-info.error {
+            color: #ef4444;
         }
         
         .loading {
@@ -234,6 +271,31 @@
             font-size: 14px;
             line-height: 1.8;
         }
+        
+        .quick-questions {
+            padding: 15px 20px;
+            background: #f0fdf4;
+            border-top: 1px solid #dcfce7;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .quick-question {
+            background: white;
+            border: 1px solid #bbf7d0;
+            color: #16a34a;
+            padding: 6px 14px;
+            border-radius: 15px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .quick-question:hover {
+            background: #bbf7d0;
+            color: #15803d;
+        }
     </style>
 </head>
 <body>
@@ -242,7 +304,10 @@
             <div class="chat-box">
                 <div class="header">
                     <h1>🤖 对话机器人</h1>
-                    <button @click="clearMessages">清空对话</button>
+                    <div class="actions">
+                        <button @click="clearMessages">清空对话</button>
+                        <button @click="loadSessionList">会话列表</button>
+                    </div>
                 </div>
                 
                 <div class="messages" ref="messagesContainer">
@@ -252,10 +317,17 @@
                     </div>
                     
                     <div v-for="(msg, index) in messages" :key="index" :class="['message', msg.role]">
-                        <div class="message-content">{{ msg.content }}</div>
-                        <div v-if="msg.sources && msg.sources.length > 0" class="sources">
-                            <span>来源:</span>
-                            <span v-for="(source, i) in msg.sources" :key="i">{{ source }}{{ i < msg.sources.length - 1 ? ', ' : '' }}</span>
+                        <div>
+                            <div class="message-content">{{ msg.content }}</div>
+                            <div v-if="msg.sources && msg.sources.length > 0" class="meta">
+                                <div class="sources">
+                                    <span>来源:</span>
+                                    <span v-for="(source, i) in msg.sources" :key="i">{{ source.split('/').pop() }}{{ i < msg.sources.length - 1 ? ', ' : '' }}</span>
+                                </div>
+                            </div>
+                            <div v-if="msg.intent && msg.role === 'assistant'" class="meta">
+                                <span class="intent">意图: {{ getIntentName(msg.intent) }}</span>
+                            </div>
                         </div>
                     </div>
                     
@@ -271,10 +343,15 @@
                     </div>
                 </div>
                 
+                <div class="quick-questions">
+                    <span style="color: #16a34a; font-weight: 500; margin-right: 5px;">快速提问:</span>
+                    <button v-for="q in quickQuestions" :key="q" class="quick-question" @click="sendQuickQuestion(q)">{{ q }}</button>
+                </div>
+                
                 <div class="upload-area">
                     <label for="file-upload">📁 上传文档</label>
                     <input id="file-upload" type="file" @change="handleFileUpload" accept=".txt,.pdf,.docx">
-                    <span>{{ uploadedFile || '支持 txt、pdf、docx 格式' }}</span>
+                    <span :class="['upload-info', uploadStatus]">{{ uploadMessage }}</span>
                 </div>
                 
                 <div class="input-area">
@@ -288,6 +365,19 @@
                 </div>
             </div>
         </div>
+        
+        <div v-if="showSessionList" class="modal-overlay" @click.self="showSessionList = false">
+            <div class="modal">
+                <h3>会话列表</h3>
+                <ul>
+                    <li v-for="session in sessionList" :key="session">
+                        <button @click="loadSession(session)">{{ session }}</button>
+                        <button @click="deleteSession(session)" class="delete-btn">删除</button>
+                    </li>
+                </ul>
+                <button @click="showSessionList = false" class="close-btn">关闭</button>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -298,11 +388,35 @@
                 const messages = ref([]);
                 const inputMessage = ref('');
                 const isLoading = ref(false);
-                const uploadedFile = ref('');
+                const uploadMessage = ref('支持 txt、pdf、docx 格式');
+                const uploadStatus = ref('');
                 const sessionId = ref(null);
                 const messagesContainer = ref(null);
+                const showSessionList = ref(false);
+                const sessionList = ref([]);
+                
+                const quickQuestions = [
+                    '总结文档内容',
+                    '搜索相关信息',
+                    '介绍一下你自己',
+                    '这个文档讲了什么'
+                ];
+                
+                const intentNames = {
+                    'question': '问题',
+                    'chat': '闲聊',
+                    'upload': '上传',
+                    'summarize': '总结',
+                    'search': '搜索',
+                    'unknown': '未知',
+                    'filtered': '已过滤'
+                };
                 
                 const API_BASE = 'http://localhost:8000/api';
+                
+                const getIntentName = (intent) => {
+                    return intentNames[intent] || intent;
+                };
                 
                 const scrollToBottom = async () => {
                     await nextTick();
@@ -325,7 +439,8 @@
                         const response = await axios.post(`${API_BASE}/chat`, {
                             user_id: 'default_user',
                             message: message,
-                            session_id: sessionId.value
+                            session_id: sessionId.value,
+                            answer_format: 'markdown'
                         });
                         
                         sessionId.value = response.data.session_id;
@@ -333,7 +448,8 @@
                         messages.value.push({
                             role: 'assistant',
                             content: response.data.reply,
-                            sources: response.data.sources
+                            sources: response.data.sources,
+                            intent: response.data.intent
                         });
                     } catch (error) {
                         messages.value.push({
@@ -347,48 +463,181 @@
                     }
                 };
                 
+                const sendQuickQuestion = async (question) => {
+                    inputMessage.value = question;
+                    await sendMessage();
+                };
+                
                 const handleFileUpload = async (event) => {
                     const file = event.target.files[0];
                     if (!file) return;
                     
-                    uploadedFile.value = file.name;
+                    uploadMessage.value = `正在上传: ${file.name}...`;
+                    uploadStatus.value = '';
+                    
+                    const formData = new FormData();
+                    formData.append('file', file);
                     
                     try {
-                        await axios.post(`${API_BASE}/documents/load`, {
-                            file_path: file.name,
-                            file_type: file.name.split('.').pop().toLowerCase()
+                        const response = await axios.post(`${API_BASE}/documents/upload`, formData, {
+                            headers: {
+                                'Content-Type': 'multipart/form-data'
+                            }
                         });
+                        
+                        uploadMessage.value = response.data.message;
+                        uploadStatus.value = 'success';
                         
                         messages.value.push({
                             role: 'assistant',
-                            content: `已成功加载文档: ${file.name}`
+                            content: `✅ ${response.data.message}`
                         });
+                        await scrollToBottom();
                     } catch (error) {
+                        uploadMessage.value = error.response?.data?.detail || '上传失败';
+                        uploadStatus.value = 'error';
+                        
                         messages.value.push({
                             role: 'assistant',
-                            content: `加载文档失败: ${error.message}`
+                            content: `❌ ${uploadMessage.value}`
                         });
+                        await scrollToBottom();
                     }
+                    
+                    event.target.value = '';
                 };
                 
                 const clearMessages = () => {
                     messages.value = [];
                     sessionId.value = null;
-                    uploadedFile.value = '';
+                    uploadMessage.value = '支持 txt、pdf、docx 格式';
+                    uploadStatus.value = '';
+                };
+                
+                const loadSessionList = async () => {
+                    try {
+                        const response = await axios.get(`${API_BASE}/sessions`);
+                        sessionList.value = response.data.sessions;
+                        showSessionList.value = true;
+                    } catch (error) {
+                        console.error(error);
+                    }
+                };
+                
+                const loadSession = async (session) => {
+                    try {
+                        const response = await axios.get(`${API_BASE}/session/${session}`);
+                        messages.value = response.data.messages;
+                        sessionId.value = session;
+                        showSessionList.value = false;
+                        await scrollToBottom();
+                    } catch (error) {
+                        console.error(error);
+                    }
+                };
+                
+                const deleteSession = async (session) => {
+                    if (!confirm(`确定要删除会话 ${session} 吗？`)) return;
+                    
+                    try {
+                        await axios.delete(`${API_BASE}/session/${session}`);
+                        sessionList.value = sessionList.value.filter(s => s !== session);
+                        if (sessionId.value === session) {
+                            clearMessages();
+                        }
+                    } catch (error) {
+                        console.error(error);
+                    }
                 };
                 
                 return {
                     messages,
                     inputMessage,
                     isLoading,
-                    uploadedFile,
+                    uploadMessage,
+                    uploadStatus,
+                    sessionId,
                     messagesContainer,
+                    showSessionList,
+                    sessionList,
+                    quickQuestions,
+                    getIntentName,
                     sendMessage,
+                    sendQuickQuestion,
                     handleFileUpload,
-                    clearMessages
+                    clearMessages,
+                    loadSessionList,
+                    loadSession,
+                    deleteSession
                 };
             }
         }).mount('#app');
     </script>
+    
+    <style>
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .modal {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            min-width: 400px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        
+        .modal h3 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        
+        .modal ul {
+            list-style: none;
+        }
+        
+        .modal li {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .modal li button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 5px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        
+        .modal li .delete-btn {
+            background: #ef4444;
+        }
+        
+        .modal .close-btn {
+            margin-top: 20px;
+            width: 100%;
+            background: #f0f0f0;
+            color: #333;
+            border: none;
+            padding: 10px;
+            border-radius: 10px;
+            cursor: pointer;
+        }
+    </style>
 </body>
 </html>
