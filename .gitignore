@@ -12,6 +12,5 @@ node_modules/
 dist/
 build/
 vector_db/
-documents/
 sessions/
 *.log
