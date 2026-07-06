@@ -1,9 +1,5 @@
-import os
 import re
 from typing import List, Dict, Optional
-from dotenv import load_dotenv
-
-load_dotenv()
 
 class AnswerFormatter:
     def __init__(self):
